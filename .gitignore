@@ -1,0 +1,8 @@
+.env
+data/
+outputs/
+*_out.txt
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,15 @@
+# Phase 2 — CoT generation via the Claude API
+anthropic>=1.0.0
+
+# Phases 2/5 — dataset handling and Hub publishing
+datasets
+huggingface_hub
+
+# Phase 4 — evaluation
+rouge-score
+
+# Phase 5 — demo
+gradio
+
+# Phase 3 is Colab-only (T4 GPU), installed there, not here:
+#   unsloth trl transformers peft bitsandbytes accelerate torch
