@@ -1,5 +1,6 @@
-# Phase 2 — CoT generation via the Claude API
-anthropic>=1.0.0
+# Phase 2 — CoT generation against a local OpenAI-compatible server
+# (vLLM / Ollama / LM Studio / llama.cpp on the 5090 box). No paid API.
+openai>=1.40
 
 # Phases 2/5 — dataset handling and Hub publishing
 datasets
@@ -11,5 +12,11 @@ rouge-score
 # Phase 5 — demo
 gradio
 
-# Phase 3 is Colab-only (T4 GPU), installed there, not here:
-#   unsloth trl transformers peft bitsandbytes accelerate torch
+# Phase 3 — training, installed on the GPU box only:
+#   unsloth trl transformers peft bitsandbytes accelerate
+#   torch  (5090 is Blackwell/sm_120 -> needs a CUDA 12.8+ build:
+#           pip install torch --index-url https://download.pytorch.org/whl/cu128)
+#
+# Serving on the GPU box, pick one:
+#   pip install vllm            # best throughput, real guided-JSON decoding
+#   ollama serve                # simplest; OpenAI-compatible on :11434/v1

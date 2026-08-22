@@ -9,6 +9,56 @@
 
 ---
 
+## Amendment v3 (2026-08-23) — no hosted API; local open models on a 5090
+
+**The project no longer uses the Anthropic API.** Generation now runs against a
+locally served open-weights model (Qwen and peers) on a separate PC with an
+RTX 5090. Everything below in §2 that describes Claude, per-token pricing or
+the Batches API is **superseded** and kept only as the record of why the
+current design looks the way it does.
+
+What changed, and what deliberately did not:
+
+| Area | Before | Now |
+|---|---|---|
+| Generator | `claude-opus-5` pilot → `claude-sonnet-5` batch | Any local model behind an OpenAI-compatible server; chosen by bake-off |
+| Transport | Anthropic SDK, Batches API | `scripts/llm_client.py` → vLLM / Ollama / LM Studio / llama.cpp |
+| Structured output | `output_config.format.json_schema` | Negotiated per server: `json_schema` → vLLM `guided_json` → `json_object` → prompt-only |
+| Scaling | One 10,774-request batch, 50% discount | Concurrent worker pool, resumable, `--workers` |
+| Budget | ~$47–119 | $0 + GPU hours |
+| Deadline pressure | Sonnet intro pricing lapsing 2026-08-31 | **Gone** — no clock |
+| Model choice | Decided in §2.3 by reputation and price | Decided empirically by `02d_model_bakeoff.py` |
+| Phase 3 host | Colab T4 (free tier) | The 5090; base model raised from 3B to 7B |
+| Prompt, validators, splits, `qid` scheme | — | **Unchanged.** They were never provider-specific |
+
+Three new failure modes a hosted API did not have, all handled in
+`scripts/llm_client.py`:
+
+1. **Structured-output support varies by server.** The mode is negotiated once
+   per run and reused, so an older llama.cpp build degrades to prompt-only
+   instead of failing outright.
+2. **Reasoning models emit `<think>…</think>` inline.** Stripped before JSON
+   parsing, along with markdown fences. An *unterminated* `<think>` is treated
+   as truncation rather than parsed around — it means the model never reached
+   its answer.
+3. **The run occupies your GPU for hours.** `02b_bulk_cot.py` flushes every
+   accepted chain immediately and rebuilds its resume set from the output file,
+   so killing it to use the GPU costs only the in-flight requests.
+
+New risks this introduces, replacing the pricing-deadline row in the register:
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| Open models write weaker Bengali than Claude did | **High** | Bake-off across Qwen / Aya / Gemma on validator pass rate, plus a human read; this is why §2.3's model decision moved from prose to a script |
+| 32 GB VRAM caps model size | Certain | 4-bit quantized 27–32B; stop the server before training |
+| Blackwell (sm_120) needs CUDA 12.8+ wheels | Medium | Documented in `requirements.txt`; surfaces as "no kernel image is available", not as a code bug |
+| Local server dies mid-run | Medium | Resumable by construction; `--status` reports progress |
+
+Current run order lives in `README.md`; a plain-language walkthrough of the
+whole project is in `Explain.md`.
+
+---
+
 ## 0. Verified state of the repo
 
 ### 0.0 Files
@@ -296,6 +346,8 @@ print(f"deduped={len(deduped)} test={len(test)} pool={len(pool)}")
 
 ## Phase 2 — Genuine Bengali CoT via the Claude API ⭐
 
+> **SUPERSEDED by Amendment v3.** Generation is local now. The prompt contract (§2.4), the validators and the pilot gate (§2.5) still stand verbatim — only the transport and the model changed.
+
 **Goal:** for every training-pool question, a **real** step-by-step Bengali chain that derives the answer from subject principles — not hint-restatement, not answer-leaking.
 
 **Provider:** Anthropic API via the official `anthropic` Python SDK. Needs `ANTHROPIC_API_KEY`.
@@ -313,6 +365,8 @@ print(f"deduped={len(deduped)} test={len(test)} pool={len(pool)}")
 Confirmed correct in v1 and kept: `claude-opus-5` as a valid current model ID; `output_config={"format": {"type":"json_schema", ...}}` (top-level `output_format` is deprecated); `thinking={"type":"adaptive"}` (`budget_tokens` would 400 on these models — thinking is on by default on Opus 5, so the explicit param is correct-but-redundant; keep it for clarity).
 
 ### 2.2 Model and cost
+
+> **SUPERSEDED — there is no per-token cost.** The constraint is now GPU wall-clock, which the pilot measures and prints.
 
 Assumptions: ~400 input tokens/request, ~800 output tokens/request **including thinking tokens, which bill as output**. Bengali tokenizes poorly, so treat these as **±2×** — the pilot's `usage` field replaces them with real numbers before committing to the full run.
 
@@ -463,6 +517,8 @@ if __name__ == "__main__":
 
 ### 2.6 Full run (Batches API)
 
+> **SUPERSEDED by `scripts/02b_bulk_cot.py`.** No batch queue exists locally; a resumable worker pool replaces it. The 'key by custom_id, never by index' rule survives — results still complete out of order.
+
 ```python
 # scripts/02b_batch_cot.py
 from anthropic.types.messages.batch_create_params import Request
@@ -504,6 +560,8 @@ Publish (**CV item #2**):
 ---
 
 ## Phase 3 — QLoRA fine-tune (Unsloth + Llama-3.2-3B, Colab T4)
+
+> **AMENDED: runs on the 5090, base model now Qwen2.5-7B-Instruct** (ungated, and 32 GB fits a 7B QLoRA where a T4's 16 GB would not). The p99 token-length gate matters *more*, not less — it is unchanged.
 
 The one phase that is **not** local Windows.
 
@@ -651,7 +709,7 @@ Secrets in `.env`, **`.gitignore`'d before the first commit**: `ANTHROPIC_API_KE
 | Claude's Bengali CoT is fluent but pedagogically shallow | Medium | 30-question human pilot gate before spending anything |
 | Refusals on biology content (`bio` classifier) | Low–Medium | `extract()` handles `stop_reason: "refusal"`; quarantine + report |
 | Sonnet 5 noticeably worse than Opus 5 on Bengali reasoning | Medium | 100-row side-by-side before committing the batch |
-| Sonnet intro pricing lapses 2026-08-31 | Certain if slow | Phases 0–1 are one day; target the batch inside the window |
+| ~~Sonnet intro pricing lapses 2026-08-31~~ | **Void** | No hosted API — see Amendment v3 for the risks that replace this |
 | 2 quarantined rows unrepairable | Low | Drop and document — 0.02% |
 
 ## What's left open
@@ -659,4 +717,4 @@ Secrets in `.env`, **`.gitignore`'d before the first commit**: `ANTHROPIC_API_KE
 Nothing blocking. Phase 2's §2.3 decisions are reversible up to the moment the batch is submitted; the pilot's measured `usage` numbers replace §2.2's estimates before that point.
 
 ---
-*Plan v2 — all §0 figures measured on disk. Phases 0–1 and the Phase-2 baseline executed; §2.2 costs are still estimates until the pilot runs.*
+*Plan v2 + Amendment v3 — all §0 figures measured on disk. Phases 0–1 and the Phase-2 baseline executed. §2 describes a hosted API that is no longer used; read Amendment v3 first.*

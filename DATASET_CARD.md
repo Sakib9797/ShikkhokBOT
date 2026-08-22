@@ -17,8 +17,11 @@ size_categories:
 # ShikkhokBot — SSC Bangla Science CoT
 
 Bengali chain-of-thought reasoning for SSC-level Biology, Chemistry and Physics
-short-answer questions, generated with the Claude API on top of the
-[SSC-BanglaTutor](https://huggingface.co/datasets) corpus.
+short-answer questions, generated with open-source models running locally, on
+top of the [SSC-BanglaTutor](https://huggingface.co/datasets) corpus.
+
+No hosted API was used at any stage: generation ran against a local
+OpenAI-compatible server on a single consumer GPU.
 
 ## Why this exists
 
@@ -56,12 +59,13 @@ is in `reports/cot_baseline_ours.md`.
    question → **10,903 unique**. Every subject a question appeared under is kept
    in `_subjects`.
 4. **Split.** A subject-stratified **100-question hold-out** (`test100.jsonl`)
-   that is never trained on and never sent to Claude; the remaining **10,803**
+   that is never trained on and never used for generation; the remaining **10,803**
    rows form the generation/training pool.
-5. **Generate.** Structured JSON output (`steps[3..6]`, `final_answer`) through
-   the Batches API. Pilot on `claude-opus-5`, full run on `claude-sonnet-5`.
-   The gold answer is supplied privately so the chain lands correctly; `Hints`
-   are not.
+5. **Generate.** Structured JSON output (`steps[3..6]`, `final_answer`) from a
+   locally served open-weights model, selected by generating a 100-row pilot per
+   candidate and ranking them on the validators below rather than on reputation
+   (`reports/model_bakeoff.md` records that comparison). The gold answer is
+   supplied privately so the chain lands correctly; `Hints` are not.
 6. **Validate.** Every chain is machine-checked and the reason is kept in
    `_reject` (null = clean): `step_count`, `answer_leak` (gold answer appears in
    a step), `hint_copy` (>34% of steps are verbatim hints), `not_bengali`
@@ -96,7 +100,7 @@ clean `_reject` means the chain does not leak the answer, does not copy hints,
 is in Bengali, and lands on the gold answer; it does not certify that the
 reasoning is pedagogically ideal. Sample before relying on it.
 
-Llama-family tokenizers spend 4–8 tokens per Bengali word, so these chains are
+English-dominant tokenizers spend 4–8 tokens per Bengali word, so these chains are
 token-expensive relative to their character length — check your sequence-length
 budget before training.
 
@@ -107,6 +111,14 @@ under the same terms.
 
 ## Citation
 
-Generated with the Claude API (`claude-opus-5` pilot, `claude-sonnet-5` full
-run). Pipeline: <https://github.com/> — `scripts/00_validate.py` through
-`scripts/06_publish.py`.
+Please cite the original SSC-BanglaTutor corpus alongside this derivative — the
+questions, hints and gold answers are their work; only the reasoning chains are
+ours.
+
+The generating model is recorded per row in `_cot_model`, so the provenance of
+every chain is inspectable rather than stated once in prose. Pipeline:
+`scripts/00_validate.py` through `scripts/06_publish.py`.
+
+> **Before publishing:** fill in the SSC-BanglaTutor citation and confirm its
+> licence permits a derivative release. This is not optional bookkeeping — an
+> unattributed derivative can get the dataset pulled.

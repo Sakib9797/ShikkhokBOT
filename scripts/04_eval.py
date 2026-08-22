@@ -1,15 +1,15 @@
 # scripts/04_eval.py
 """Phase 4 — evaluate the fine-tuned adapter against the zero-shot baseline.
 
-Scores the untouched `data/clean/test100.jsonl` (never trained on, never sent
-to Claude) on exact-match and ROUGE-L, and writes `outputs/eval/report.md`.
+Scores the untouched `data/clean/test100.jsonl` (never trained on, never used
+for generation) on exact-match and ROUGE-L, and writes `outputs/eval/report.md`.
 
-    python scripts/04_eval.py --generate          # needs a GPU: runs both models
+    python scripts/04_eval.py --generate          # on the 5090: runs both models
     python scripts/04_eval.py                     # score existing predictions
 
 Generation writes `outputs/eval/preds_{base,ft}.jsonl` so the (GPU, slow) half
-and the (local, fast) scoring half can run on different machines: generate on
-Colab, download the two prediction files, score here.
+and the (CPU, fast) scoring half can run on different machines: generate on the
+5090, copy the two prediction files over, score anywhere.
 
 The ROUGE tokenizer override is load-bearing. `rouge_score`'s default does
 `re.sub(r"[^a-z0-9]+", " ", text.lower())`, which strips every Bengali
@@ -94,7 +94,7 @@ def score(rows, preds, scorer):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--generate", action="store_true", help="run both models (needs GPU)")
-    ap.add_argument("--base", default="meta-llama/Llama-3.2-3B-Instruct")
+    ap.add_argument("--base", default="Qwen/Qwen2.5-7B-Instruct")
     ap.add_argument("--adapter", default="outputs/adapter")
     args = ap.parse_args()
 
@@ -124,11 +124,11 @@ def main():
 
     md = ["# ShikkhokBot — evaluation\n",
           f"Held-out test set: `{TEST}` ({len(rows)} questions, never trained on, "
-          "never sent to Claude).\n",
+          "never used for generation).\n",
           "## Automatic metrics\n",
           "| Model | Scored | Exact-match | ROUGE-L |",
           "|---|---:|---:|---:|",
-          f"| Llama-3.2-3B-Instruct (zero-shot) | {nb} | {emb:.1%} | {rlb:.3f} |",
+          f"| {args.base} (zero-shot) | {nb} | {emb:.1%} | {rlb:.3f} |",
           f"| + Bengali-CoT QLoRA (ours) | {nf} | {emf:.1%} | {rlf:.3f} |",
           f"| **Delta** | | **{emf - emb:+.1%}** | **{rlf - rlb:+.3f}** |",
           "\nExact-match = a gold `ExactAnswer` appears in the generation "

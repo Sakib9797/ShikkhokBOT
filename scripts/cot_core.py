@@ -1,17 +1,24 @@
 # scripts/cot_core.py
-"""Phase 2 shared machinery — prompt contract, extraction, validators.
+"""Phase 2 shared machinery — prompt contract and validators.
 
-Imported by ``02_generate_cot.py`` (streaming pilot), ``02b_batch_cot.py``
-(Batches API full run) and ``02c_baseline_metrics.py`` (the upstream-CoT
-baseline the paper compares against). Kept in its own module because the
-numeric-prefixed script names are not importable as packages.
+Imported by ``02_generate_cot.py`` (pilot), ``02b_bulk_cot.py`` (full run),
+``02c_baseline_metrics.py`` (the upstream-CoT baseline) and
+``02d_model_bakeoff.py`` (local model selection). Kept in its own module
+because the numeric-prefixed script names are not importable as packages.
+
+Model-agnostic by design: the prompt and the validators are the same whether
+the chains come from a hosted API or from a local Qwen on the 5090. Only
+``llm_client.py`` knows how the tokens are produced.
 
 The prompt deliberately withholds ``Hints``: feeding them back is precisely how
-the upstream dataset ended up 67.1% hint-copy.
+the upstream dataset ended up 70% hint-copy.
 """
 import json
+import pathlib
 import re
 import unicodedata
+
+from llm_client import load_env  # noqa: F401  (re-exported for the scripts)
 
 # --- structured output contract -------------------------------------------
 
@@ -26,9 +33,9 @@ COT_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Few-shot exemplars serve two purposes: better step quality, and pushing the
-# shared prefix past the 512-token minimum cacheable length so `cache_control`
-# actually engages. A bare instruction block sits under that floor.
+# Few-shot exemplars matter more for a local 32B than they did for a frontier
+# model: they pin the output shape, the step granularity, and the register of
+# the Bengali. Do not trim these to save prompt tokens.
 _EXEMPLARS = """
 উদাহরণ ১ —
 প্রশ্ন: উদ্ভিদের সালোকসংশ্লেষণ প্রক্রিয়ায় কোন গ্যাস গ্রহণ করা হয়?
@@ -53,22 +60,27 @@ final_answer: ৭
 final_answer: নিউটন
 """.strip()
 
+_JSON_RULE = (
+    'শুধুমাত্র JSON আউটপুট দাও, এই আকারে: '
+    '{"steps": ["...", "...", "..."], "final_answer": "..."} — '
+    'কোনো অতিরিক্ত লেখা, ব্যাখ্যা বা markdown fence যোগ করবে না।'
+)
+
 SYSTEM = (
     "তুমি একজন বাংলা মাধ্যমিক (SSC) বিজ্ঞান শিক্ষক। "
     "প্রশ্নের উত্তরে পৌঁছাতে বিষয়ভিত্তিক নীতির উপর ভিত্তি করে ধাপে ধাপে যুক্তি সাজাও। "
     "প্রতিটি ধাপ আগের ধাপ থেকে যৌক্তিকভাবে এগোবে — শুধু তথ্য পুনরাবৃত্তি নয়। "
     "মধ্যবর্তী কোনো ধাপে চূড়ান্ত উত্তর লিখবে না; উত্তর শুধু final_answer-এ থাকবে। "
     "৩–৬টি ধাপ ব্যবহার করো। সম্পূর্ণ উত্তর বাংলায় লিখবে।\n\n"
-    + _EXEMPLARS
+    + _EXEMPLARS + "\n\n" + _JSON_RULE
 )
 
-# The system prompt is a fixed prefix across every request in the run, so it is
-# worth a cache breakpoint. Caching stacks with the Batches discount.
-SYSTEM_BLOCKS = [{
-    "type": "text",
-    "text": SYSTEM,
-    "cache_control": {"type": "ephemeral"},
-}]
+# Appended to the user turn when retrying a chain the validators rejected.
+RETRY_NUDGE = (
+    "\n\nগুরুত্বপূর্ণ: আগের চেষ্টাটি বাতিল হয়েছে। কোনো মধ্যবর্তী ধাপে চূড়ান্ত উত্তর "
+    "লিখবে না, hint-এর বাক্য হুবহু অনুলিপি করবে না, এবং প্রতিটি ধাপ যেন নতুন "
+    "যুক্তি যোগ করে।"
+)
 
 
 def build_user(e):
@@ -84,50 +96,16 @@ def build_user(e):
     )
 
 
-def request_params(model, effort="medium"):
-    """Shared Messages-API params. `effort` and `format` share ONE dict."""
-    return dict(
-        model=model,
-        max_tokens=4096,                 # thinking + text share this budget
-        thinking={"type": "adaptive"},
-        system=SYSTEM_BLOCKS,
-        output_config={
-            "format": {"type": "json_schema", "schema": COT_SCHEMA},
-            "effort": effort,
-        },
-    )
-
-
-# --- response handling -----------------------------------------------------
-
 class Rejected(Exception):
-    """A 200-OK response we cannot use: refusal, empty, truncated, unparseable."""
-
-
-def extract(msg):
-    """Pull the JSON payload out of a Message, or raise Rejected.
-
-    `stop_reason == "refusal"` arrives as an HTTP 200 with empty or partial
-    content — non-trivial here, since this is a biology dataset and a `bio`
-    refusal category exists.
-    """
-    if getattr(msg, "stop_reason", None) == "refusal":
-        raise Rejected("refusal")
-    blocks = [b.text for b in msg.content if b.type == "text"]
-    if not blocks:
-        raise Rejected(f"empty content, stop_reason={msg.stop_reason}")
-    if msg.stop_reason == "max_tokens":
-        raise Rejected("truncated — raise max_tokens")
-    try:
-        return json.loads("".join(blocks))
-    except json.JSONDecodeError as exc:
-        raise Rejected(f"unparseable json: {exc}") from exc
+    """A response we cannot use: unparseable, truncated, or off-contract."""
 
 
 # --- validators: the whole point of the exercise ---------------------------
 
 BN = re.compile(r"[ঀ-৿]")
 _STEP_PREFIX = re.compile(r"^\s*ধাপ\s*[০-৯0-9]+\s*[:：.]\s*")
+
+HINT_COPY_THRESHOLD = 0.34      # baseline to beat: 70.2%
 
 
 def nrm(s):
@@ -137,9 +115,6 @@ def nrm(s):
 def strip_step_prefix(s):
     """Drop a leading `ধাপ ৩:` so step text compares against raw hint text."""
     return _STEP_PREFIX.sub("", nrm(s))
-
-
-HINT_COPY_THRESHOLD = 0.34      # baseline to beat: 67.1%
 
 
 def validate(data, e):
@@ -152,7 +127,7 @@ def validate(data, e):
     body = " ".join(steps)
     golds = [a for a in e.get("ExactAnswer", []) if str(a).strip()]
     if any(nrm(a) in nrm(body) for a in golds):
-        return "answer_leak"                    # baseline to beat: 8.9%
+        return "answer_leak"                    # baseline to beat: 9.4%
 
     hints = {nrm(h) for h in (e.get("Hints") or []) if str(h).strip()}
     if hints:
@@ -176,26 +151,7 @@ def to_cot(data):
 
 # --- shared io helpers -----------------------------------------------------
 
-def load_env(path=".env"):
-    """Minimal .env reader — avoids a python-dotenv dependency."""
-    import os
-    import pathlib
-    p = pathlib.Path(path)
-    if not p.exists():
-        return
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        v = v.strip().strip('"').strip("'")
-        if v and not os.environ.get(k.strip()):
-            os.environ[k.strip()] = v
-
-
-
 def read_jsonl(path):
-    import pathlib
     p = pathlib.Path(path)
     if not p.exists():
         return []

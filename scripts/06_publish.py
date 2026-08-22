@@ -13,7 +13,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from cot_core import load_env  # noqa: E402
+from llm_client import load_env  # noqa: E402
 
 COT = pathlib.Path("data/cot/all_cot.jsonl")
 CARD = pathlib.Path("DATASET_CARD.md")
@@ -52,7 +52,7 @@ def push_dataset(args):
 
 def push_adapter(args):
     if not ADAPTER.exists():
-        sys.exit(f"{ADAPTER} missing — run scripts/03_train.py on Colab first.")
+        sys.exit(f"{ADAPTER} missing — run scripts/03_train.py on the 5090 first.")
     a = api()
     a.create_repo(args.repo, repo_type="model", exist_ok=True, private=args.private)
     a.upload_folder(folder_path=str(ADAPTER), repo_id=args.repo, repo_type="model",

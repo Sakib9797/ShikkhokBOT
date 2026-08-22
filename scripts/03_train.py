@@ -1,17 +1,26 @@
 # scripts/03_train.py
-"""Phase 3 — QLoRA fine-tune of Llama-3.2-3B-Instruct on the Bengali CoT set.
+"""Phase 3 — QLoRA fine-tune on the Bengali CoT set.
 
-Runs on a Colab T4 (free tier), NOT on the local Windows box. Upload
-`data/cot/all_cot.jsonl` to the Colab session (or pull it from the HF dataset)
-and run:
+Runs on the 5090 box, the same machine serving Phase 2. Stop the inference
+server first — 32 GB does not hold a 32B server and a training run at once.
 
-    !pip install -q unsloth trl transformers peft bitsandbytes accelerate datasets
-    !python 03_train.py --data all_cot.jsonl
+    pip install unsloth trl transformers peft bitsandbytes accelerate datasets
+    python scripts/03_train.py --data data/cot/all_cot.jsonl
 
-The length gate before `.train()` is not optional. Llama-3.2's BPE vocab is
-English-dominant and spends 4-8 tokens per Bengali word, so a 400-character
-chain can exceed 1,000 tokens. Silent truncation would teach the model to stop
-mid-reasoning, and you would not find out until three hours later.
+A free Colab T4 also works if the 5090 is busy; drop to a 3B base there.
+
+Default base is Qwen2.5-7B-Instruct: ungated (no HF token needed), and 32 GB of
+VRAM fits a 7B QLoRA comfortably where a T4's 16 GB would not. `--base` takes
+anything Unsloth loads.
+
+The length gate before `.train()` is not optional. English-dominant BPE vocabs
+spend 4-8 tokens per Bengali word, so a 400-character chain can exceed 1,000
+tokens. Silent truncation would teach the model to stop mid-reasoning, and you
+would not find out until hours later.
+
+Blackwell caveat: the 5090 is sm_120 and needs a CUDA 12.8+ PyTorch build.
+If bitsandbytes or Unsloth throws a "no kernel image is available" error, that
+is the cause — reinstall torch from the cu128 index, not a code bug.
 """
 import argparse
 import json
@@ -23,7 +32,7 @@ SYS = "তুমি একজন বাংলা মাধ্যমিক বি
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data/cot/all_cot.jsonl")
-    ap.add_argument("--base", default="meta-llama/Llama-3.2-3B-Instruct")
+    ap.add_argument("--base", default="Qwen/Qwen2.5-7B-Instruct")
     ap.add_argument("--out", default="outputs/adapter")
     ap.add_argument("--maxlen", type=int, default=2048)
     ap.add_argument("--epochs", type=float, default=3)
