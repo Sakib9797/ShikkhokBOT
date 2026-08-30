@@ -9,13 +9,23 @@
 
 ---
 
-## Amendment v3 (2026-08-23) — no hosted API; local open models on a 5090
+## Amendment v3 (2026-08-23) — local open models on a 5090, plus Groq as an option
 
-**The project no longer uses the Anthropic API.** Generation now runs against a
-locally served open-weights model (Qwen and peers) on a separate PC with an
-RTX 5090. Everything below in §2 that describes Claude, per-token pricing or
-the Batches API is **superseded** and kept only as the record of why the
-current design looks the way it does.
+**The project no longer uses the Anthropic API.** Generation runs against any
+OpenAI-compatible endpoint, selected per run with `--provider`:
+
+* `local` (default) — an open-weights model (Qwen and peers) served on a
+  separate PC with an RTX 5090. Free, private, unmetered.
+* `groq` — Groq's hosted API, added 2026-08-30. No GPU needed and very fast,
+  but metered, rate-limited, and the questions leave your machine.
+
+Everything below in §2 that describes Claude, per-token pricing or the Batches
+API is **superseded** and kept only as the record of why the current design
+looks the way it does.
+
+The prompt, schema and validators are provider-independent, so chains generated
+on either backend are directly comparable and can be ranked side by side in the
+same bake-off. `_cot_model` records the producing model per row.
 
 What changed, and what deliberately did not:
 
@@ -53,6 +63,9 @@ New risks this introduces, replacing the pricing-deadline row in the register:
 | 32 GB VRAM caps model size | Certain | 4-bit quantized 27–32B; stop the server before training |
 | Blackwell (sm_120) needs CUDA 12.8+ wheels | Medium | Documented in `requirements.txt`; surfaces as "no kernel image is available", not as a code bug |
 | Local server dies mid-run | Medium | Resumable by construction; `--status` reports progress |
+| Groq free-tier rate limits stall the full run | **High if used** | Client-side `--rpm` pacing plus SDK backoff; throttled rows stay pending rather than quarantining, so a rerun completes them |
+| Groq sees the corpus | Certain if used | Public academic questions, no personal data — but note it in the dataset card if Groq generated the released chains |
+| A key leaks into git | Low | `GROQ_API_KEY` lives only in the git-ignored `.env`; the client refuses placeholder values rather than sending them |
 
 Current run order lives in `README.md`; a plain-language walkthrough of the
 whole project is in `Explain.md`.

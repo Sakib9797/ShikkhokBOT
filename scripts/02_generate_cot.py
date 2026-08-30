@@ -29,7 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from cot_core import (COT_SCHEMA, SYSTEM, append_jsonl, build_user,  # noqa: E402
                       load_env, read_jsonl, to_cot, validate)
-from llm_client import DEFAULT_MODEL, LLMClient, LLMError  # noqa: E402
+from llm_client import (LLMError, add_provider_args,  # noqa: E402
+                        client_from_args)
 
 POOL = "data/clean/train_pool.jsonl"
 FULL_POOL_SIZE = 10803
@@ -45,17 +46,19 @@ def generate_one(client, e, max_tokens):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", "--count", type=int, default=30)
-    ap.add_argument("--model", default=None, help=f"default: {DEFAULT_MODEL} or $LLM_MODEL")
-    ap.add_argument("--base-url", default=None, help="default: $LLM_BASE_URL")
     ap.add_argument("--out", default="data/cot/pilot_cot.jsonl")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--max-tokens", type=int, default=2048)
+    add_provider_args(ap)
     args = ap.parse_args()
 
     load_env()
-    client = LLMClient(args.base_url, args.model,
-                       temperature=args.temperature, max_tokens=args.max_tokens)
+    try:
+        client = client_from_args(args, temperature=args.temperature,
+                                  max_tokens=args.max_tokens)
+    except LLMError as exc:
+        sys.exit(str(exc))
 
     pool = read_jsonl(POOL)
     if not pool:
@@ -70,8 +73,8 @@ def main():
         return
 
     # negotiate the json mode once, serially, so workers do not race on it
+    print(f"provider : {client.provider}")
     print(f"model    : {client.model}")
-    print(f"base_url : {client.base_url}")
     first = todo[0]
     t0 = time.time()
     try:

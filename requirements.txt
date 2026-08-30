@@ -1,5 +1,7 @@
-# Phase 2 — CoT generation against a local OpenAI-compatible server
-# (vLLM / Ollama / LM Studio / llama.cpp on the 5090 box). No paid API.
+# Phase 2 — CoT generation. One client, two backends:
+#   local : vLLM / Ollama / LM Studio / llama.cpp on the 5090 box (free)
+#   groq  : https://api.groq.com/openai/v1 (hosted, metered, needs GROQ_API_KEY)
+# Both speak the OpenAI protocol, so no groq-specific package is needed.
 openai>=1.40
 
 # Phases 2/5 — dataset handling and Hub publishing

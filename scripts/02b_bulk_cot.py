@@ -28,7 +28,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from cot_core import (COT_SCHEMA, RETRY_NUDGE, SYSTEM, build_user,  # noqa: E402
                       load_env, read_jsonl, to_cot, validate)
-from llm_client import DEFAULT_MODEL, LLMClient, LLMError  # noqa: E402
+from llm_client import (LLMError, RateLimitedError,  # noqa: E402
+                        add_provider_args, client_from_args)
 
 POOL = "data/clean/train_pool.jsonl"
 OUT = pathlib.Path("data/cot/all_cot.jsonl")
@@ -52,8 +53,6 @@ def status():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default=None, help=f"default: {DEFAULT_MODEL} or $LLM_MODEL")
-    ap.add_argument("--base-url", default=None, help="default: $LLM_BASE_URL")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--max-tokens", type=int, default=2048)
@@ -61,6 +60,7 @@ def main():
     ap.add_argument("--retry", action="store_true",
                     help="regenerate validator-rejected chains with a stricter prompt")
     ap.add_argument("--status", action="store_true")
+    add_provider_args(ap)
     args = ap.parse_args()
 
     if args.status:
@@ -86,8 +86,12 @@ def main():
         status()
         return
 
-    client = LLMClient(args.base_url, args.model,
-                       temperature=args.temperature, max_tokens=args.max_tokens)
+    try:
+        client = client_from_args(args, temperature=args.temperature,
+                                  max_tokens=args.max_tokens)
+    except LLMError as exc:
+        sys.exit(str(exc))
+    print(f"provider : {client.provider}")
     print(f"model    : {client.model}")
     print(f"base_url : {client.base_url}")
     print(f"{verb} {len(todo)} chains at {args.workers} workers")
@@ -101,7 +105,7 @@ def main():
                  f"run `python scripts/llm_client.py --check` to isolate it.")
     print(f"json mode: {client.mode}")
 
-    counts = {"ok": 0, "rejected": 0, "quarantined": 0}
+    counts = {"ok": 0, "rejected": 0, "quarantined": 0, "throttled": 0}
     rejects = {}
     t0 = time.time()
 
@@ -111,6 +115,10 @@ def main():
             data, _ = client.complete(SYSTEM, user, COT_SCHEMA, args.max_tokens)
             if not isinstance(data, dict) or "steps" not in data:
                 raise LLMError(f"off-contract: {str(data)[:120]}")
+        except RateLimitedError as exc:
+            # not a bad row: the provider throttled us. Left out of `have`, so a
+            # rerun picks it up automatically once quota returns.
+            return e, None, f"RateLimited: {str(exc)[:200]}"
         except Exception as exc:
             return e, None, f"{type(exc).__name__}: {str(exc)[:200]}"
         return e, data, None
@@ -126,8 +134,11 @@ def main():
             for i, fut in enumerate(as_completed(futures), 1):
                 e, data, err = fut.result()
                 if err:
-                    counts["quarantined"] += 1
-                    quarantine.append({"qid": e["qid"], "why": err})
+                    if err.startswith("RateLimited"):
+                        counts["throttled"] += 1
+                    else:
+                        counts["quarantined"] += 1
+                        quarantine.append({"qid": e["qid"], "why": err})
                 else:
                     row = dict(e)
                     row["CoT"] = to_cot(data)

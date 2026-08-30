@@ -182,10 +182,22 @@ This is the main event.
 We take each of the 10,803 questions and ask a powerful open-source AI model
 (such as **Qwen**) to write genuine step-by-step reasoning in Bangla.
 
-The AI runs **on your own PC with the RTX 5090 graphics card**. Nothing is sent
-to a paid service, nothing costs money per question, and the data never leaves
-your machines. The 5090 acts as a small private AI server; the pipeline sends it
-questions and collects the answers.
+You can run that AI in either of two places, and the project supports both with
+a single switch:
+
+**On your own PC with the RTX 5090.** The graphics card acts as a small private
+AI server. Nothing is sent anywhere, nothing costs money per question, and the
+data never leaves your machines. Slower, but free and completely private.
+
+**On Groq**, a company that runs open-source models on their own hardware and
+lets you send questions over the internet. Much faster, and you need no GPU at
+all — but it is a metered service with usage limits, and your questions travel
+to their servers. Since these are public textbook questions with no personal
+data in them, that is a fair trade if you want speed.
+
+Both options run the exact same instructions and the exact same quality checks,
+so explanations made one way are directly comparable to the other. Each row
+records which model wrote it, so you can always tell them apart later.
 
 **Three design decisions that matter:**
 
@@ -370,6 +382,8 @@ licence.
 | **JSONL** | A text file with one record per line. All our data files are this format |
 | **Deduplication** | Removing repeated entries |
 | **vLLM / Ollama** | Programs that run an AI model on your own GPU and let other programs talk to it |
+| **Groq** | A company that runs open-source AI models on their own hardware and lets you use them over the internet |
+| **Rate limit** | A cap on how many requests a service accepts per minute. Local servers have none; Groq does |
 | **Validator** | Our automatic checker that accepts or rejects each generated explanation |
 | **Quarantine** | Where rejected items go — kept and counted, never silently deleted |
 
@@ -381,5 +395,5 @@ licence.
    hints, and we proved it with a number instead of an opinion.
 2. **We generate real Bangla reasoning by hiding the hints**, then machine-check
    every single chain against the exact failures we are trying to fix.
-3. **Everything runs on your own hardware and is given away free** — no paid
-   API, no locked data, no per-question cost.
+3. **You choose where the AI runs** — free on your own 5090, or fast on Groq —
+   and everything produced is given away free: the data, the model, the demo.

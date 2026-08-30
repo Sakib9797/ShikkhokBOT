@@ -17,11 +17,14 @@ size_categories:
 # ShikkhokBot — SSC Bangla Science CoT
 
 Bengali chain-of-thought reasoning for SSC-level Biology, Chemistry and Physics
-short-answer questions, generated with open-source models running locally, on
-top of the [SSC-BanglaTutor](https://huggingface.co/datasets) corpus.
+short-answer questions, generated with open-weights models on top of the
+[SSC-BanglaTutor](https://huggingface.co/datasets) corpus.
 
-No hosted API was used at any stage: generation ran against a local
-OpenAI-compatible server on a single consumer GPU.
+Generation runs against an OpenAI-compatible endpoint — either a local server on
+a single consumer GPU, or Groq's hosted API. The prompt, the schema and the
+validators are identical either way; the model that produced each chain is
+recorded per row in `_cot_model`, so provenance is inspectable rather than
+asserted.
 
 ## Why this exists
 
