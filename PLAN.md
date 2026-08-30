@@ -67,6 +67,44 @@ New risks this introduces, replacing the pricing-deadline row in the register:
 | Groq sees the corpus | Certain if used | Public academic questions, no personal data — but note it in the dataset card if Groq generated the released chains |
 | A key leaks into git | Low | `GROQ_API_KEY` lives only in the git-ignored `.env`; the client refuses placeholder values rather than sending them |
 
+### First live pilot (2026-08-30, Groq `openai/gpt-oss-120b`, 45 chains)
+
+**The contribution is confirmed: 0.0% verbatim hint-copy (0 of 181 step lines)
+against the upstream corpus's 70.2%.** Withholding `Hints` from the prompt works
+exactly as intended. Average 4.0 steps/chain, ~880 in / ~460 out tokens.
+
+**But `answer_leak` as specified is the wrong metric for this corpus, and the
+paper must not report it head-to-head.** Two distinct problems were found:
+
+1. **A definition mismatch, now fixed.** `02c_baseline_metrics.py` scores the
+   upstream corpus on `steps[:-1]` — a leak is the answer appearing *before the
+   closing step*. `validate()` was scoring every step including the closing one.
+   Comparing those two numbers would have understated our own result. The
+   validator now uses the same rule. Pilot pass rate went 19% → 42% on that
+   correction alone, with no change to the generated text.
+
+2. **A conceptual mismatch, still open.** The remaining rejections are mostly
+   not giveaways. For short-answer recall items the model reasons by
+   enumeration — "the nutrients are carbohydrate, lipid, … and protein" — then
+   narrows. Naming the term while deriving it is how elimination reasoning
+   works, and for a definitional question it is unavoidable. Upstream's 9.4%
+   measures something qualitatively different: literally restating
+   `তাই সঠিক উত্তর হলো "X"` mid-chain.
+
+   **Decision needed before the full run.** Options: (a) report hint-copy as the
+   headline and drop the leak comparison as non-equivalent; (b) redefine leak to
+   catch only *assertive* statements of the answer, not mentions; (c) keep the
+   strict rule and accept ~40% yield, retrying the rest. Sharpening the prompt
+   to demand descriptive reference ("এই পুষ্টি উপাদানটি") did **not** move the
+   rate — 42% before and after — so this is a property of the task, not of the
+   wording.
+
+**Operational:** Groq's binding free-tier limit is TPM, not RPM. At ~1.3k
+tokens/request, 55 rpm reliably 429s on `gpt-oss-120b`; the default is now 25.
+Throttled rows stay pending rather than quarantining, as designed. Measured
+throughput ~6.3 s/request → ~19 h for the full pool on the free tier, which is
+the argument for running the bulk generation on the 5090 instead.
+
 Current run order lives in `README.md`; a plain-language walkthrough of the
 whole project is in `Explain.md`.
 

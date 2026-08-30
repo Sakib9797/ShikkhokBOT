@@ -63,8 +63,11 @@ PROVIDERS = {
         # Groq rejects vLLM's guided_json; json_schema works on its newer
         # models, json_object on most of the rest
         "modes": ("schema", "object", "none"),
-        "model": "qwen/qwen3-32b",
-        "rpm": 55,                    # free tier is commonly 60 rpm; leave headroom
+        "model": "openai/gpt-oss-120b",
+        # TPM, not RPM, is usually the binding free-tier limit: at ~1.3k
+        # tokens/request, 25/min is about 33k TPM. Raise with --rpm if your
+        # tier allows; 55 reliably 429s on gpt-oss-120b.
+        "rpm": 25,
     },
 }
 DEFAULT_PROVIDER = "local"

@@ -124,9 +124,14 @@ def validate(data, e):
     if not (3 <= len(steps) <= 6):
         return "step_count"
 
-    body = " ".join(steps)
+    # A leak is the answer appearing BEFORE the chain has finished reasoning.
+    # The closing step is allowed to name it — "অতএব ... হল টিস্যু কালচার" is how
+    # a teacher lands a derivation, not a giveaway. This must stay identical to
+    # the rule 02c_baseline_metrics.py applies to the upstream corpus (steps[:-1]),
+    # or the two numbers in the paper are not measuring the same thing.
+    body = " ".join(steps[:-1]) if len(steps) > 1 else ""
     golds = [a for a in e.get("ExactAnswer", []) if str(a).strip()]
-    if any(nrm(a) in nrm(body) for a in golds):
+    if body and any(nrm(a) in nrm(body) for a in golds):
         return "answer_leak"                    # baseline to beat: 9.4%
 
     hints = {nrm(h) for h in (e.get("Hints") or []) if str(h).strip()}
