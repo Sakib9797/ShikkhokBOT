@@ -186,10 +186,20 @@ python scripts/04_eval.py --generate
 python scripts/04_eval.py
 ```
 
-Ship:
+Ship. The demo defaults to **agent mode**: each question runs a
+retrieve → reason → verify → revise loop, and the answer carries an expandable
+trace of the steps taken.
 
 ```bash
-python scripts/05_demo.py
+python scripts/05_demo.py --provider groq
+```
+
+```bash
+python scripts/05_demo.py --backend chat
+```
+
+```bash
+python scripts/05_demo.py --backend adapter
 ```
 ```bash
 python scripts/06_publish.py dataset --repo <user>/ShikkhokBot-SSC-Bangla-CoT
@@ -209,7 +219,8 @@ scripts/
   02d_model_bakeoff.py   rank candidate models on validator pass rate
   03_train.py            QLoRA fine-tune
   04_eval.py             exact-match + Bengali-aware ROUGE-L
-  05_demo.py             Gradio chat
+  agent.py               retrieve/verify/revise loop + corpus retriever
+  05_demo.py             Gradio chat (agent | chat | adapter backends)
   06_publish.py          push dataset / adapter to the Hub
 data/clean/              merged · test100 · train_pool
 data/cot/                pilot_* · all_cot · quarantine
@@ -229,6 +240,14 @@ DATASET_CARD.md          the HF dataset README
   `json_object`, then plain prompting, and remembers which one was accepted.
 - **`json_object` mode requires the literal word "JSON" in the prompt.** The
   Bengali system prompt contains it deliberately — do not remove it.
+- **The agent's retriever is lexical, not embeddings.** TF-IDF over 10,903
+  short Bengali questions builds in 0.3s and searches in ~1ms, with no GPU, no
+  model download and no extra dependency. Swap in embeddings only if recall
+  proves too low in practice.
+- **A strong retrieval match unlocks the stronger checks.** Above a 0.55 score
+  the agent holds a verified gold answer, so it can check whether its own draft
+  actually lands on it. Below that, only the structural rules apply — the agent
+  never invents a gold answer to grade itself against.
 - **Rate-limited rows are not quarantined.** If Groq throttles, those rows stay
   pending and the next run picks them up; only genuine failures quarantine.
 - **Reasoning models emit `<think>` blocks inline.** These are stripped before

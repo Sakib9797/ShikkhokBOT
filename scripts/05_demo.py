@@ -30,6 +30,7 @@ import random
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from agent import CorpusIndex, TutorAgent, format_trace  # noqa: E402
 from cot_core import COT_SCHEMA, SYSTEM, nrm, read_jsonl, strip_step_prefix, to_cot  # noqa: E402
 from llm_client import LLMError, add_provider_args, client_from_args, load_env  # noqa: E402
 
@@ -67,6 +68,25 @@ def make_api_responder(args):
         return to_cot(data)
 
     return respond, f"{client.provider} · {client.model}"
+
+
+def make_agent_responder(args):
+    """Retrieve -> reason -> verify -> revise, with the loop shown to the user."""
+    client = client_from_args(args, temperature=0.3, max_tokens=2048)
+    agent = TutorAgent(client, max_attempts=args.max_attempts)
+
+    def respond(question, history):
+        answer, trace = agent.answer(question, history)
+        # the trace is what makes the loop legible rather than a black box
+        parts = [
+            answer,
+            "<details><summary>🤖 এজেন্টের ধাপ / agent trace</summary>",
+            format_trace(trace),
+            "</details>",
+        ]
+        return "\n\n".join(parts)
+
+    return respond, f"agent · {client.provider} · {client.model}"
 
 
 def make_adapter_responder(args):
@@ -178,6 +198,14 @@ def build_app(respond, backend_label, args):
         else:
             gr.Markdown(f"Backend: `{backend_label}`")
 
+        if backend_label.startswith("agent"):
+            gr.Markdown(
+                "**Agent mode.** Each question runs a loop: it searches your "
+                "10,903-question corpus for related items, drafts a chain using "
+                "them plus the conversation so far, runs the project's own "
+                "validators over its own draft, and revises if one fires. Expand "
+                "*agent trace* under any answer to see the steps it took.")
+
         with gr.Tab("Ask the tutor"):
             # Gradio 6 dropped the `type` kwarg; messages format is the default.
             gr.ChatInterface(respond, examples=EXAMPLES)
@@ -233,8 +261,12 @@ def build_app(respond, backend_label, args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", default="api", choices=["api", "adapter"],
-                    help="api = local/Groq preview (works now); adapter = fine-tuned")
+    ap.add_argument("--backend", default="agent",
+                    choices=["agent", "chat", "adapter"],
+                    help="agent = retrieve/verify/revise loop (default); "
+                         "chat = plain one-shot; adapter = fine-tuned model")
+    ap.add_argument("--max-attempts", type=int, default=3,
+                    help="agent: how many times to revise a failing draft")
     ap.add_argument("--adapter", default="outputs/adapter")
     ap.add_argument("--share", action="store_true")
     ap.add_argument("--port", type=int, default=7860)
@@ -246,11 +278,12 @@ def main():
     if args.backend == "adapter":
         if not pathlib.Path(args.adapter).exists():
             sys.exit(f"{args.adapter} does not exist — run scripts/03_train.py first, "
-                     f"or use --backend api to preview against a served model.")
+                     f"or use --backend agent to preview against a served model.")
         respond, label = make_adapter_responder(args)
     else:
         try:
-            respond, label = make_api_responder(args)
+            respond, label = (make_agent_responder(args) if args.backend == "agent"
+                              else make_api_responder(args))
         except LLMError as exc:
             sys.exit(str(exc))
 
