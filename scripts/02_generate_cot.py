@@ -22,8 +22,10 @@ and compare them with `02d_model_bakeoff.py` rather than picking on reputation.
 """
 import argparse
 import pathlib
+import random
 import sys
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -50,6 +52,12 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--head", action="store_true",
+                    help="take the first N pool rows instead of a spread across "
+                         "subjects (the pool is grouped by subject, so this gives "
+                         "a single-subject sample — rarely what a pilot wants)")
+    ap.add_argument("--seed", type=int, default=42,
+                    help="sampling seed, so a pilot is reproducible")
     add_provider_args(ap)
     args = ap.parse_args()
 
@@ -64,10 +72,28 @@ def main():
     if not pool:
         sys.exit(f"{POOL} is missing or empty — run scripts/01_prepare.py first.")
 
+    # The pool is grouped by subject (all Biology, then Chemistry, then
+    # Physics), so pool[:N] is a single-subject sample and a pilot run on it
+    # can never surface a Chemistry or Physics failure. Draw a subject-
+    # proportional spread instead, seeded so the sample is reproducible.
+    if args.head:
+        picked = pool[:args.count]
+    else:
+        by_subject = defaultdict(list)
+        for e in pool:
+            by_subject[e["_subject"]].append(e)
+        rng = random.Random(args.seed)
+        picked = []
+        for subject, items in sorted(by_subject.items()):
+            share = round(args.count * len(items) / len(pool))
+            picked += rng.sample(items, min(share, len(items)))
+        picked = picked[:args.count]
+        rng.shuffle(picked)
+
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     done = {r["qid"] for r in read_jsonl(out)}
-    todo = [e for e in pool[:args.count] if e["qid"] not in done]
+    todo = [e for e in picked if e["qid"] not in done]
     if not todo:
         print("nothing new to generate (all requested qids already done)")
         return
